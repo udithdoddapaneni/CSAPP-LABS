@@ -184,6 +184,7 @@ void eval(char *cmdline)
     return; /* Ignore empty lines */
     if (!builtin_cmd(argv)) {
         if ((pid = fork()) == 0) { /* Child runs user job */
+            setpgid(getpid(), getpid());
             static sigset_t block_set;
             sigemptyset(&block_set);
             sigaddset(&block_set, SIGINT);
@@ -283,7 +284,7 @@ int builtin_cmd(char **argv)
     if (argv[0][0] == 'j' && argv[0][1] == 'o' && argv[0][2] == 'b' && argv[0][3] == 's'){ 
         return 1;
     }
-    if ((argv[0][0] == 'b' || argv[0][0] == 'f') && argv[0][1] == 'g' && argv[1][0] == '%'){
+    if ((argv[0][0] == 'b' || argv[0][0] == 'f') && argv[0][1] == 'g'){
         do_bgfg(argv);
         return 1;
     }
@@ -295,18 +296,73 @@ int builtin_cmd(char **argv)
  */
 void do_bgfg(char **argv) 
 {
-    int jid = atoi(argv[1]+1);
+    int jid;
+    int pid;
     struct job_t *job;
     if (argv[0][0] == 'b'){
+        if (argv[1] == NULL){
+            printf("bg command requires PID or ");
+            printf("%c",'%');
+            printf("jobid argument\n");
+            return;
+        }
+        if (argv[1][0] != '%'){
+            pid = atoi(argv[1]);
+            if (pid == 0){
+                printf("bg: argument must be a PID or ");
+                printf("%c",'%');
+                printf("jobid\n");
+                return;
+            }
+            else{
+                job = getjobpid(jobs,pid);
+                if (job == NULL){
+                    printf("No such process\n");
+                    return;
+                }
+                job->state = BG;
+                printf("Job [%d] (%d) %s", job->jid, job->pid ,job->cmdline);
+                kill(-(job->pid), SIGCONT);
+                return;
+            }
+        }
+        jid = atoi(argv[1]+1);
         job = getjobjid(jobs, jid);
         if (job == NULL){
             printf("No such job\n");
             return;
         }
         job->state = BG;
-        kill(job->pid, SIGCONT);
+        printf("Job [%d] (%d) %s", job->jid, job->pid ,job->cmdline);
+        kill(-(job->pid), SIGCONT);
     }
     else{
+        if (argv[1] == NULL){
+            printf("fg command requires PID or ");
+            printf("%c",'%');
+            printf("jobid argument\n");
+            return;
+        }
+        if (argv[1][0] != '%'){
+            pid = atoi(argv[1]);
+            if (pid == 0){
+                printf("fg: argument must be a PID or ");
+                printf("%c",'%');
+                printf("jobid\n");
+                return;
+            }
+            else{
+                job = getjobpid(jobs,pid);
+                if (job == NULL){
+                    printf("No such process\n");
+                    return;
+                }
+                job->state = BG;
+                kill(-(job->pid), SIGCONT);
+                return;
+            }
+        }
+        jid = atoi(argv[1]+1);
         job = getjobjid(jobs, jid);
         if (job == NULL){
             printf("No such job\n");
@@ -314,7 +370,7 @@ void do_bgfg(char **argv)
         }
         if (job->state == ST){
             job->state = FG;
-            kill(job->pid, SIGCONT);
+            kill(-(job->pid), SIGCONT);
         }
         else{
             job->state = FG;
@@ -368,7 +424,7 @@ void sigint_handler(int sig)
     int p = fgpid(jobs);
     if (p == 0) return;
     printf("Job [%d] (%d) terminated by signal 2\n", pid2jid(p), p);
-    kill(p, SIGKILL);
+    kill(-p, SIGKILL);
 }
 
 /*
@@ -385,7 +441,7 @@ void sigtstp_handler(int sig)
     printf("Job [%d] (%d) stopped by signal 20\n", pid2jid(p), p);
     struct job_t *J = getjobpid(jobs, p);
     J->state = ST;
-    kill(p, SIGSTOP);
+    kill(-p, SIGSTOP);
     return;
 }
 
@@ -607,6 +663,3 @@ void sigquit_handler(int sig)
     printf("Terminating after receipt of SIGQUIT signal\n");
     exit(1);
 }
-
-
-
